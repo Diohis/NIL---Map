@@ -88,7 +88,7 @@ async def process_name(message: Message, state: FSMContext, bot = Bot) -> None:
     phone = data["phone"]
     adress = f"{data["location"].latitude},{data["location"].longitude}"
     worksheet = sheet.worksheet("Adress_Info")
-    if worksheet.findall(f"{phone}")!=[]:
+    if worksheet.findall(str(phone)[1:])!=[]:
         await message.reply("Вы уже поделились информацией ранее!")
         return
     column_index = 1
