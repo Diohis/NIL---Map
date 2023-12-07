@@ -22,6 +22,9 @@ class Find(StatesGroup):
     forms = State()
 class Load(StatesGroup):
     forms = State()
+class Letter(StatesGroup):
+    message = State()
+    photo = State()
 
 def create_admin_buttons()->InlineKeyboardBuilder:
     builder = InlineKeyboardBuilder()
@@ -60,9 +63,12 @@ def create_buttons(type:str,action:int,data:list)->InlineKeyboardBuilder:
     )
     return builder
 
+
 def create_form_message(people:dict)->str:
     message = f"ФИО: {people[0]}\nТелефон: {people[1]}"
     return message
+
+
 @router.message(Command(commands=["cancel"]))
 @router.message(F.text.casefold() == "cancel")
 async def cmd_cancel(message: Message, state: FSMContext):
@@ -110,9 +116,7 @@ async def callbacks_admin_panel(callback: types.CallbackQuery,state: FSMContext,
     action = callback.data.split("_")[1]
     if action == "find":
         worksheet = sheet.worksheet("Adress_Info")
-        
         await state.set_state(Find.forms)
-        
         await state.update_data(forms = worksheet.get_all_values()[1:]) #занести в state массив анкет из таблицы
         data = await state.get_data()
         data = data["forms"]
@@ -132,4 +136,50 @@ async def callbacks_admin_panel(callback: types.CallbackQuery,state: FSMContext,
         await callback.answer()
     if action == "hide":
         await callback.answer()
+        await cmd_cancel(callback.message,state)
         await callback.message.delete()
+    if action == "letter":
+        await callback.message.answer("Отправьте текст нового сообщения")
+        await callback.answer()
+        await state.set_state(Letter.message)
+@router.message(Letter.message)
+async def letter_message(message: Message, state: FSMContext) -> None:
+    await state.update_data(message=message.text)
+    await message.answer("Теперь отправьте фотографию нового сообщения")
+    await state.set_state(Letter.photo)
+@router.message(Letter.photo,F.photo)
+async def letter_message(message: Message, state: FSMContext) -> None:
+    await state.update_data(photo = message.photo)
+    data = await state.get_data()
+    builder = InlineKeyboardBuilder()
+    builder.row(types.InlineKeyboardButton(
+        text="Отправить",
+        callback_data=f"letter_go")
+    )
+    builder.add(types.InlineKeyboardButton(
+        text="Редактирование",
+        callback_data=f"letter_restart")
+    )
+    await message.answer_photo(photo = data["photo"][0].file_id,caption=data["message"],reply_markup=builder.as_markup())
+@router.callback_query(F.data.startswith("letter_"))
+async def callbacks_admin_letter(callback: types.CallbackQuery,state: FSMContext,bot = Bot):
+    action = callback.data.split("_")[1]
+    data = await state.get_data()
+    await state.clear()
+    message = data["message"]
+    photo =  data["photo"][0].file_id
+    if action == "go":
+        worksheet = sheet.worksheet("Adress_Post")
+        column_index = 1
+        row_index = len(worksheet.get_all_values())+1
+        worksheet.update_cell(row_index, column_index, message)
+        worksheet.update_cell(row_index, column_index+1, photo)
+        worksheet = sheet.worksheet("Adress_Contact")
+        await callback.answer()
+        for user_id in worksheet.col_values(1)[1:]:
+            await bot.send_photo(chat_id=user_id,photo=photo,caption=message)
+    else:
+        await callback.message.delete()
+        await callback.message.answer("Отправьте текст нового сообщения")
+        await callback.answer()
+        await state.set_state(Letter.message)
